@@ -320,60 +320,72 @@ namespace FEBuilderGBA.Avalonia.Dialogs
             };
         }
 
-        internal static MacExternalToolPickerResult ResolveMacExternalToolPickerResult(
-            ExternalProcessResult result,
-            Func<string, bool> fileExists,
-            Func<string, bool> directoryExists)
-        {
-            if (result.Kind != ExternalProcessResultKind.Exited || result.ExitCode != 0)
-            {
-                string detail = !string.IsNullOrWhiteSpace(result.Message)
-                    ? result.Message
-                    : !string.IsNullOrWhiteSpace(result.StandardError)
-                        ? result.StandardError.Trim()
-                        : $"osascript exited with code {result.ExitCode?.ToString() ?? "unknown"}.";
-                return new MacExternalToolPickerResult(
-                    MacExternalToolPickerResultKind.Fallback,
-                    null,
-                    "macOS external-tool picker failed: " + detail);
-            }
+ internal static MacExternalToolPickerResult ResolveMacExternalToolPickerResult(
+    ExternalProcessResult result,
+    Func<string, bool> fileExists,
+    Func<string, bool> directoryExists)
+{
+    if (result.Kind != ExternalProcessResultKind.Exited || result.ExitCode != 0)
+    {
+        string detail = !string.IsNullOrWhiteSpace(result.Message)
+            ? result.Message
+            : !string.IsNullOrWhiteSpace(result.StandardError)
+                ? result.StandardError.Trim()
+                : $"osascript exited with code {result.ExitCode?.ToString() ?? "unknown"}.";
 
-            string path = result.StandardOutput.TrimEnd('\r', '\n');
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return new MacExternalToolPickerResult(
-                    MacExternalToolPickerResultKind.Cancelled,
-                    null,
-                    string.Empty);
-            }
+        return new MacExternalToolPickerResult(
+            MacExternalToolPickerResultKind.Fallback,
+            null,
+            "macOS external-tool picker failed: " + detail);
+    }
 
-            bool isAppBundle = directoryExists(path)
-                && string.Equals(Path.GetExtension(path), ".app", StringComparison.OrdinalIgnoreCase);
-            if (fileExists(path) || isAppBundle)
-            {
-                return new MacExternalToolPickerResult(
-                    MacExternalToolPickerResultKind.Selected,
-                    path,
-                    string.Empty);
-            }
+    string path = result.StandardOutput.TrimEnd('\r', '\n');
+    string normalizedPath = path.TrimEnd(
+        Path.DirectorySeparatorChar,
+        Path.AltDirectorySeparatorChar);
 
-            return new MacExternalToolPickerResult(
-                MacExternalToolPickerResultKind.Fallback,
-                null,
-                $"The macOS picker returned a path that is not an executable file or .app bundle: {path}");
-        }
+    if (string.IsNullOrWhiteSpace(normalizedPath))
+    {
+        return new MacExternalToolPickerResult(
+            MacExternalToolPickerResultKind.Cancelled,
+            null,
+            string.Empty);
+    }
 
-        static async Task<MacExternalToolPickerResult> PickMacExternalToolAsync(string title)
+    bool isAppBundle = directoryExists(normalizedPath)
+        && string.Equals(
+            Path.GetExtension(normalizedPath),
+            ".app",
+            StringComparison.OrdinalIgnoreCase);
+
+    if (fileExists(normalizedPath) || isAppBundle)
+    {
+        return new MacExternalToolPickerResult(
+            MacExternalToolPickerResultKind.Selected,
+            normalizedPath,
+            string.Empty);
+    }
+
+    return new MacExternalToolPickerResult(
+        MacExternalToolPickerResultKind.Fallback,
+        null,
+        $"The macOS picker returned a path that is not an executable file or .app bundle: {normalizedPath}");
+}
+
+ static async Task<MacExternalToolPickerResult> PickMacExternalToolAsync(string title)
         {
             ExternalProcessResult processResult =
                 await ExternalLauncher.Current.RunCapturedProcessAsync(
                     CreateMacExternalToolPickerRequest(title));
+
             MacExternalToolPickerResult result = ResolveMacExternalToolPickerResult(
                 processResult,
                 File.Exists,
                 Directory.Exists);
+
             if (result.Kind == MacExternalToolPickerResultKind.Fallback)
                 Log.Error($"FileDialogHelper.OpenExternalTool: {result.Message}");
+
             return result;
         }
 
